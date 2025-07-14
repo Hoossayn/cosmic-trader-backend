@@ -3,7 +3,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import Dict, List
 
 from dotenv import load_dotenv
-from fastapi import Body, FastAPI, Query
+from fastapi import Body, FastAPI, Query, HTTPException
 from x10.perpetual.accounts import StarkPerpetualAccount
 from x10.perpetual.configuration import TESTNET_CONFIG
 from x10.perpetual.configuration import MAINNET_CONFIG
@@ -57,26 +57,32 @@ async def place_order(data: Dict = Body(...)):
     else:
         raise ValueError("Unsupported order type")
 
-    markets = await trading_client.markets_info.get_markets(market_names=[market])
-    market_config = markets.data[0]
-    min_order_size = Decimal(market_config.trading_config.min_order_size)
-    min_change = Decimal(market_config.trading_config.min_order_size_change)
-    amount = ((amount / min_change).to_integral_value(rounding=ROUND_HALF_UP)) * min_change
-    if amount < min_order_size:
-        raise ValueError(f"Adjusted amount {amount} is less than minimum order size {min_order_size} for {market}")
-    min_price_change = Decimal(market_config.trading_config.min_price_change)
-    price = ((price / min_price_change).to_integral_value(rounding=ROUND_HALF_UP) * min_price_change)
-    leverage_value = Decimal(str(data.get('leverage', '15')))
-    await trading_client.account.update_leverage(market_name=market, leverage=leverage_value)
-    placed_order = await trading_client.place_order(
-        market_name=market,
-        amount_of_synthetic=amount,
-        price=price,
-        side=side,
-        time_in_force=tif,
-        post_only=post_only,
-    )
-    return {"order_id": placed_order.data.id, "external_id": placed_order.data.external_id}
+    try:
+        markets = await trading_client.markets_info.get_markets(market_names=[market])
+        market_config = markets.data[0]
+        min_order_size = Decimal(market_config.trading_config.min_order_size)
+        min_change = Decimal(market_config.trading_config.min_order_size_change)
+        amount = ((amount / min_change).to_integral_value(rounding=ROUND_HALF_UP)) * min_change
+        if amount < min_order_size:
+            raise ValueError(f"Adjusted amount {amount} is less than minimum order size {min_order_size} for {market}")
+        min_price_change = Decimal(market_config.trading_config.min_price_change)
+        price = ((price / min_price_change).to_integral_value(rounding=ROUND_HALF_UP) * min_price_change)
+        max_leverage = Decimal(market_config.trading_config.max_leverage)
+        leverage_value = Decimal(str(data.get('leverage', '15')))
+        if leverage_value < Decimal('2') or leverage_value > max_leverage:
+            raise ValueError(f"Leverage must be between 2 and {max_leverage} for {market}")
+        await trading_client.account.update_leverage(market_name=market, leverage=leverage_value)
+        placed_order = await trading_client.place_order(
+            market_name=market,
+            amount_of_synthetic=amount,
+            price=price,
+            side=side,
+            time_in_force=tif,
+            post_only=post_only,
+        )
+        return {"order_id": placed_order.data.id, "external_id": placed_order.data.external_id}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get("/account_details")
