@@ -143,12 +143,12 @@ async def get_leverage(market_names: List[str] = Query(None)):
 @app.get("/open_positions")
 async def get_open_positions(market_names: List[str] = Query(None)):
     positions = await trading_client.account.get_positions(market_names=market_names)
-    return [p.model_dump() for p in positions.data]
+    return {"data": [p.model_dump() for p in positions.data]}
 
 @app.get("/closed_positions")
 async def get_closed_positions(market_names: List[str] = Query(None)):
     history = await trading_client.account.get_positions_history(market_names=market_names)
-    return [p.model_dump() for p in history.data]
+    return {"data": [p.model_dump() for p in history.data]}
 
 @app.get("/orders")
 async def get_orders():
