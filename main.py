@@ -95,7 +95,31 @@ async def place_order(data: Dict = Body(...)):
             time_in_force=tif,
             post_only=post_only,
         )
-        return {"order_id": placed_order.data.id, "external_id": placed_order.data.external_id}
+        
+        # Handle TP/SL if provided
+        result = {"order_id": placed_order.data.id, "external_id": placed_order.data.external_id}
+        
+        # Set Take Profit if provided
+        if 'take_profit_price' in data and data['take_profit_price']:
+            tp_price = Decimal(str(data['take_profit_price']))
+            tp_price = ((tp_price / min_price_change).to_integral_value(rounding=ROUND_HALF_UP) * min_price_change)
+            try:
+                tp_result = await trading_client.account.set_take_profit(market_name=market, price=tp_price)
+                result["take_profit"] = {"price": str(tp_price), "success": True}
+            except Exception as tp_error:
+                result["take_profit"] = {"price": str(tp_price), "success": False, "error": str(tp_error)}
+        
+        # Set Stop Loss if provided
+        if 'stop_loss_price' in data and data['stop_loss_price']:
+            sl_price = Decimal(str(data['stop_loss_price']))
+            sl_price = ((sl_price / min_price_change).to_integral_value(rounding=ROUND_HALF_UP) * min_price_change)
+            try:
+                sl_result = await trading_client.account.set_stop_loss(market_name=market, price=sl_price)
+                result["stop_loss"] = {"price": str(sl_price), "success": True}
+            except Exception as sl_error:
+                result["stop_loss"] = {"price": str(sl_price), "success": False, "error": str(sl_error)}
+        
+        return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -138,3 +162,114 @@ async def get_orders():
             async with session.get(url, headers=headers) as resp:
                 raw = await resp.json()
                 return {"raw_response": raw} 
+
+@app.post("/set_take_profit")
+async def set_take_profit(data: Dict = Body(...)):
+    try:
+        market_name = data["market_name"]
+        price = Decimal(str(data["price"]))
+        
+        # Get market config for price precision
+        markets = await trading_client.markets_info.get_markets(market_names=[market_name])
+        market_config = markets.data[0]
+        min_price_change = Decimal(market_config.trading_config.min_price_change)
+        price = ((price / min_price_change).to_integral_value(rounding=ROUND_HALF_UP) * min_price_change)
+        
+        result = await trading_client.account.set_take_profit(market_name=market_name, price=price)
+        return {"success": True, "message": f"Take profit set at ${price} for {market_name}", "data": result.data.model_dump()}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/set_stop_loss")
+async def set_stop_loss(data: Dict = Body(...)):
+    try:
+        market_name = data["market_name"]
+        price = Decimal(str(data["price"]))
+        
+        # Get market config for price precision
+        markets = await trading_client.markets_info.get_markets(market_names=[market_name])
+        market_config = markets.data[0]
+        min_price_change = Decimal(market_config.trading_config.min_price_change)
+        price = ((price / min_price_change).to_integral_value(rounding=ROUND_HALF_UP) * min_price_change)
+        
+        result = await trading_client.account.set_stop_loss(market_name=market_name, price=price)
+        return {"success": True, "message": f"Stop loss set at ${price} for {market_name}", "data": result.data.model_dump()}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/markets")
+async def get_markets(market_names: List[str] = Query(None)):
+    """
+    Get market information including configurations and statistics
+    
+    Args:
+        market_names: Optional list of specific market names to filter. If None, returns all markets.
+    
+    Returns:
+        List of markets with their configurations and current statistics
+    """
+    try:
+        # Get market configurations
+        markets_response = await trading_client.markets_info.get_markets(market_names=market_names)
+        markets_data = []
+        
+        for market in markets_response.data:
+            # Get market statistics for each market
+            try:
+                stats_response = await trading_client.markets_info.get_market_statistics(market_name=market.name)
+                market_stats = stats_response.data.model_dump()
+            except Exception as stats_error:
+                # If stats fail for individual market, continue with others
+                market_stats = {"error": f"Failed to get statistics: {str(stats_error)}"}
+            
+            # Combine market config with statistics
+            market_info = {
+                "name": market.name,
+                "config": market.model_dump(),
+                "statistics": market_stats
+            }
+            markets_data.append(market_info)
+        
+        return {"data": markets_data, "count": len(markets_data)}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/markets/{market_name}/statistics")
+async def get_market_statistics(market_name: str):
+    """
+    Get detailed statistics for a specific market
+    
+    Args:
+        market_name: Name of the market (e.g., "BTC-USD", "ETH-USD")
+        
+    Returns:
+        Market statistics including prices, volume, funding rates, etc.
+    """
+    try:
+        stats = await trading_client.markets_info.get_market_statistics(market_name=market_name)
+        return {"market": market_name, "statistics": stats.data.model_dump()}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/markets/{market_name}/config")
+async def get_market_config(market_name: str):
+    """
+    Get configuration details for a specific market
+    
+    Args:
+        market_name: Name of the market (e.g., "BTC-USD", "ETH-USD")
+        
+    Returns:
+        Market configuration including trading limits, precision, leverage, etc.
+    """
+    try:
+        markets = await trading_client.markets_info.get_markets(market_names=[market_name])
+        if not markets.data:
+            raise HTTPException(status_code=404, detail=f"Market {market_name} not found")
+        
+        market_config = markets.data[0]
+        return {"market": market_name, "config": market_config.model_dump()}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e)) 
