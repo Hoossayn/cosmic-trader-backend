@@ -36,7 +36,22 @@ async def place_order(data: Dict = Body(...)):
     market = data["market"]
     order_type = data["order_type"].lower()
     side_str = data["side"].lower()
-    amount = Decimal(str(data["amount"]))
+    if ('amount' in data) and ('usd_value' in data):
+        raise ValueError("Provide exactly one of 'amount' or 'usd_value'")
+    if ('amount' not in data) and ('usd_value' not in data):
+        raise ValueError("Provide exactly one of 'amount' or 'usd_value'")
+    if 'usd_value' in data:
+        usd_value = Decimal(str(data['usd_value']))
+        if order_type == "market":
+            stats = await trading_client.markets_info.get_market_statistics(market_name=market)
+            mark_price = Decimal(stats.data.mark_price)
+            amount = usd_value / mark_price
+        elif order_type == "limit":
+            if price_input is None:
+                raise ValueError("Price required for limit order with usd_value")
+            amount = usd_value / price_input
+    else:
+        amount = Decimal(str(data["amount"]))
     price_input = Decimal(str(data.get("price", "0"))) if "price" in data else None
 
     side = OrderSide.BUY if side_str == "buy" else OrderSide.SELL
