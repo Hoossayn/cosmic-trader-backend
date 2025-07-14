@@ -1,0 +1,4 @@
+x10-python-trading
+fastapi
+uvicorn
+python-dotenv 
