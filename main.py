@@ -82,13 +82,11 @@ async def place_order(data: Dict = Body(...)):
 @app.get("/account_details")
 async def get_account_details():
     balance = await trading_client.account.get_balance()
-    positions = await trading_client.account.get_positions()
-    leverage = await trading_client.account.get_leverage(market_names=None)
+  
 
     return {
         "balance": balance.data.model_dump(),
-        "positions": [p.model_dump() for p in positions.data],
-        "leverage": [l.model_dump() for l in leverage.data],
+        
     }
 
 
