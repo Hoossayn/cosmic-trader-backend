@@ -64,10 +64,12 @@ async def place_order(data: Dict = Body(...)):
     if order_type == "market":
         stats = await trading_client.markets_info.get_market_statistics(market_name=market)
         mark_price = Decimal(stats.data.mark_price)
-        multiplier = Decimal("1.15") if side == OrderSide.BUY else Decimal("0.85")
+        # Use a more conservative multiplier for market orders
+        multiplier = Decimal("1.05") if side == OrderSide.BUY else Decimal("0.95")
         price = mark_price * multiplier
         tif = TimeInForce.IOC
         post_only = False
+        print(f"DEBUG: Market order - mark_price: {mark_price}, multiplier: {multiplier}, calculated_price: {price}")
     elif order_type == "limit":
         if price_input is None:
             raise ValueError("Price required for limit order")
@@ -86,7 +88,8 @@ async def place_order(data: Dict = Body(...)):
         if amount < min_order_size:
             raise ValueError(f"Adjusted amount {amount} is less than minimum order size {min_order_size} for {market}")
         min_price_change = Decimal(market_config.trading_config.min_price_change)
-        price = ((price / min_price_change).to_integral_value(rounding=ROUND_HALF_UP) * min_price_change)
+        price = ((price / min_price_change).to_integral_value(rounding=ROUND_HALF_UP)) * min_price_change
+        print(f"DEBUG: After precision adjustment - min_price_change: {min_price_change}, final_price: {price}")
         max_leverage = Decimal(market_config.trading_config.max_leverage)
         leverage_value = Decimal(str(data.get('leverage', '15')))
         if leverage_value < Decimal('2') or leverage_value > max_leverage:
