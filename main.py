@@ -36,11 +36,16 @@ async def place_order(data: Dict = Body(...)):
     market = data["market"]
     order_type = data["order_type"].lower()
     side_str = data["side"].lower()
-    if ('amount' in data) and ('usd_value' in data):
+    # Check for amount and usd_value - handle null values
+    has_amount = 'amount' in data and data['amount'] is not None
+    has_usd_value = 'usd_value' in data and data['usd_value'] is not None
+    
+    if has_amount and has_usd_value:
         raise ValueError("Provide exactly one of 'amount' or 'usd_value'")
-    if ('amount' not in data) and ('usd_value' not in data):
+    if not has_amount and not has_usd_value:
         raise ValueError("Provide exactly one of 'amount' or 'usd_value'")
-    if 'usd_value' in data:
+    
+    if has_usd_value:
         usd_value = Decimal(str(data['usd_value']))
         if order_type == "market":
             stats = await trading_client.markets_info.get_market_statistics(market_name=market)
@@ -52,7 +57,7 @@ async def place_order(data: Dict = Body(...)):
             amount = usd_value / price_input
     else:
         amount = Decimal(str(data["amount"]))
-    price_input = Decimal(str(data.get("price", "0"))) if "price" in data else None
+    price_input = Decimal(str(data["price"])) if "price" in data and data["price"] is not None else None
 
     side = OrderSide.BUY if side_str == "buy" else OrderSide.SELL
 
@@ -100,7 +105,7 @@ async def place_order(data: Dict = Body(...)):
         result = {"order_id": placed_order.data.id, "external_id": placed_order.data.external_id}
         
         # Set Take Profit if provided
-        if 'take_profit_price' in data and data['take_profit_price']:
+        if 'take_profit_price' in data and data['take_profit_price'] is not None:
             tp_price = Decimal(str(data['take_profit_price']))
             tp_price = ((tp_price / min_price_change).to_integral_value(rounding=ROUND_HALF_UP) * min_price_change)
             try:
@@ -110,7 +115,7 @@ async def place_order(data: Dict = Body(...)):
                 result["take_profit"] = {"price": str(tp_price), "success": False, "error": str(tp_error)}
         
         # Set Stop Loss if provided
-        if 'stop_loss_price' in data and data['stop_loss_price']:
+        if 'stop_loss_price' in data and data['stop_loss_price'] is not None:
             sl_price = Decimal(str(data['stop_loss_price']))
             sl_price = ((sl_price / min_price_change).to_integral_value(rounding=ROUND_HALF_UP) * min_price_change)
             try:
